@@ -55,7 +55,7 @@ public class NeuralEditor
             EditorGUILayout.Separator();
 
             for (int i = 0; i < self.Layer0; ++i)
-                GUILayout.Label(string.Format("L0: {0:00}: {1,7:F4}", i, self.bias0[i]));
+                GUILayout.Label(string.Format("L0: {0:00}: {1,7:F4} = {2,7:F4}", i, self.bias0[i], self.state0[i]));
         }
 
         if (showLayer1)
@@ -63,7 +63,7 @@ public class NeuralEditor
             EditorGUILayout.Separator();
 
             for (int i = 0; i < self.Layer1; ++i)
-                GUILayout.Label(string.Format("L1: {0:00}, {1,7:F4}", i, self.bias1[i]));
+                GUILayout.Label(string.Format("L1: {0:00}, {1,7:F4} = {2,7:F4}", i, self.bias1[i], self.state1[i]));
         }
 
         if (showLayer2)
@@ -71,7 +71,7 @@ public class NeuralEditor
             EditorGUILayout.Separator();
 
             for (int i = 0; i < self.Layer2; ++i)
-                GUILayout.Label(string.Format("L2: {0:00}, {1,7:F4}", i, self.bias2[i]));
+                GUILayout.Label(string.Format("L2: {0:00}, {1,7:F4} = {2,7:F4}", i, self.bias2[i], self.state2[i]));
         }
 
         if (showWeights10)
@@ -276,30 +276,30 @@ public class Neural
     public void Mutate(float x)
     {
         for (int i = 0; i < Layer0; ++i)
-            bias0[i] = Mathf.Lerp(bias0[i], randh(), x);
+            bias0[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias0[i], randh(), x) : bias0[i];
         for (int i = 0; i < Layer1; ++i)
-            bias1[i] = Mathf.Lerp(bias1[i], randh(), x);
+            bias1[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias1[i], randh(), x) : bias1[i];
         for (int i = 0; i < Layer2; ++i)
-            bias2[i] = Mathf.Lerp(bias2[i], randh(), x);
+            bias2[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias2[i], randh(), x) : bias2[i];
 
         for (int i = 0; i < Layer0 * Layer1; ++i)
-            weights10[i] = Mathf.Lerp(weights10[i], randh(), x);
+            weights10[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(weights10[i], randh(), x) : weights10[i];
         for (int i = 0; i < Layer1 * Layer2; ++i)
-            weights21[i] = Mathf.Lerp(weights21[i], randh(), x);
+            weights21[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(weights21[i], randh(), x) : weights21[i];
     }
 
     public void Evolve(Neural from, float x)
     {
         for (int i = 0; i < Layer0; ++i)
-            bias0[i] = Random.Range(0.0f, 1.0f) < x ? bias0[i] : from.bias0[i];
+            bias0[i] = Random.Range(0.0f, 1.0f) < x ? from.bias0[i] : bias0[i];
         for (int i = 0; i < Layer1; ++i)
-            bias1[i] = Random.Range(0.0f, 1.0f) < x ? bias1[i] : from.bias1[i];
+            bias1[i] = Random.Range(0.0f, 1.0f) < x ? from.bias1[i] : bias1[i];
         for (int i = 0; i < Layer2; ++i)
-            bias2[i] = Random.Range(0.0f, 1.0f) < x ? bias2[i] : from.bias2[i];
+            bias2[i] = Random.Range(0.0f, 1.0f) < x ? from.bias2[i] : bias2[i];
 
         for (int i = 0; i < Layer0 * Layer1; ++i)
-            weights10[i] = Random.Range(0.0f, 1.0f) < x ? weights10[i] : from.weights10[i];
+            weights10[i] = Random.Range(0.0f, 1.0f) < x ? from.weights10[i] : weights10[i];
         for (int i = 0; i < Layer1 * Layer2; ++i)
-            weights21[i] = Random.Range(0.0f, 1.0f) < x ? weights21[i] : from.weights21[i];
+            weights21[i] = Random.Range(0.0f, 1.0f) < x ? from.weights21[i] : weights21[i];
     }
 }
