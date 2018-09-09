@@ -1,12 +1,15 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 
 #if UNITY_EDITOR
 using UnityEditor;
 
-[CustomEditor(typeof(Neural))]
-public class NeuralEditor
+[CustomEditor(typeof(NeuralBurst))]
+public class NeuralBurstEditor
     : Editor
 {
     private bool showLayer0;
@@ -23,7 +26,7 @@ public class NeuralEditor
         if (!Application.isPlaying)
             return;
 
-        var self = target as Neural;
+        var self = target as NeuralBurst;
 
         if (GUILayout.Button("Configure 1-1-1"))
             self.Configure(1, 1, 1);
@@ -34,8 +37,6 @@ public class NeuralEditor
         if (GUILayout.Button("Configure 1024-1024-1"))
             self.Configure(1024, 1024, 1);
 
-        if (GUILayout.Button("Reset"))
-            self.Reset();
         if (GUILayout.Button("Randomize"))
             self.Randomize();
         if (GUILayout.Button("RandomizeInputs"))
@@ -107,21 +108,14 @@ public class NeuralEditor
 }
 #endif
 
-public class Neural
+public class NeuralBurst
     : MonoBehaviour
 {
-    // single neuron takes input in, and output act out
-    // sigmoid(x) = 1.0f / (1.0f - exp(-x));
-    // out = sigmoid(in)
-    // deriv(x) = sigmoid(x) * (1.0f - sigmoid(x))
-    // input to a neuron is the weighted sum of output from other neurons
-    // each neuron also has a bias value; resting state, that adds to the result
-
     public virtual void OnEnable()
     {
         if (Automatic)
         {
-            Reset();
+            Configure(6, 12, 4);
             Randomize();
             RandomizeInputs();
         }
@@ -130,18 +124,32 @@ public class Neural
     public virtual void Update()
     {
         if (Automatic)
-            Step();
+            StepQueueJob();
     }
 
-    protected static float rand01() { return Random.Range(0.0f, 1.0f); }
-    protected static float randh() { return Random.Range(-0.5f, 0.5f); }
-    protected static float sigm(float x) { return x / (1.0f - Mathf.Exp(-x)); }
-    protected static float deriv(float x) { return sigm(x) * (1.0f - sigm(x)); }
-    protected static float tanh_slow(float x) { return (float)System.Math.Tanh((float)x); }
+    private void OnDestroy()
+    {
+        if (bias0.IsCreated) bias0.Dispose();
+        if (bias1.IsCreated) bias1.Dispose();
+        if (bias2.IsCreated) bias2.Dispose();
+
+        if (state0.IsCreated) state0.Dispose();
+        if (state1.IsCreated) state1.Dispose();
+        if (state2.IsCreated) state2.Dispose();
+
+        if (weights10.IsCreated) weights10.Dispose();
+        if (weights21.IsCreated) weights21.Dispose();
+    }
+
+    private static float rand01() { return Random.Range(0.0f, 1.0f); }
+    private static float randh() { return Random.Range(-0.5f, 0.5f); }
+    private static float sigm(float x) { return x / (1.0f - Mathf.Exp(-x)); }
+    private static float deriv(float x) { return sigm(x) * (1.0f - sigm(x)); }
+    private static float tanh_slow(float x) { return (float)System.Math.Tanh((float)x); }
 
     // tanh series expansion approximation
     // https://varietyofsound.wordpress.com/2011/02/14/efficient-tanh-computation-using-lamberts-continued-fraction/
-    protected static float tanh(float x)
+    private static float tanh(float x)
     {
         var xx = x * x;
         var ax = (((xx + 378.0f) * xx + 17325.0f) * xx + 135135.0f) * x;
@@ -155,16 +163,16 @@ public class Neural
     [System.NonSerialized] public int Layer1 = 8;
     [System.NonSerialized] public int Layer2 = 6;
 
-    [System.NonSerialized] public float[] bias0;
-    [System.NonSerialized] public float[] bias1;
-    [System.NonSerialized] public float[] bias2;
+    [System.NonSerialized] public NativeArray<float> bias0;
+    [System.NonSerialized] public NativeArray<float> bias1;
+    [System.NonSerialized] public NativeArray<float> bias2;
 
-    [System.NonSerialized] public float[] state0;
-    [System.NonSerialized] public float[] state1;
-    [System.NonSerialized] public float[] state2;
+    [System.NonSerialized] public NativeArray<float> state0;
+    [System.NonSerialized] public NativeArray<float> state1;
+    [System.NonSerialized] public NativeArray<float> state2;
 
-    [System.NonSerialized] public float[] weights10;
-    [System.NonSerialized] public float[] weights21;
+    [System.NonSerialized] public NativeArray<float> weights10;
+    [System.NonSerialized] public NativeArray<float> weights21;
 
     public void Configure(int layer0, int layer1, int layer2)
     {
@@ -174,24 +182,28 @@ public class Neural
         Layer1 = layer1;
         Layer2 = layer2;
 
-        Reset();
-    }
+        if (bias0.IsCreated) bias0.Dispose();
+        if (bias1.IsCreated) bias1.Dispose();
+        if (bias2.IsCreated) bias2.Dispose();
 
-    public void Reset()
-    {
-        //Debug.LogFormat("Neural.Reset(): {0}:{1}:{2}", Layer0, Layer1, Layer2);
+        if (state0.IsCreated) state0.Dispose();
+        if (state1.IsCreated) state1.Dispose();
+        if (state2.IsCreated) state2.Dispose();
 
-        bias0 = new float[Layer0];
-        bias1 = new float[Layer1];
-        bias2 = new float[Layer2];
+        if (weights10.IsCreated) weights10.Dispose();
+        if (weights21.IsCreated) weights21.Dispose();
 
-        state0 = new float[Layer0];
-        state1 = new float[Layer1];
-        state2 = new float[Layer2];
+        if (!bias0.IsCreated) bias0 = new NativeArray<float>(Layer0, Allocator.Persistent);
+        if (!bias1.IsCreated) bias1 = new NativeArray<float>(Layer1, Allocator.Persistent);
+        if (!bias2.IsCreated) bias2 = new NativeArray<float>(Layer2, Allocator.Persistent);
+
+        if (!state0.IsCreated) state0 = new NativeArray<float>(Layer0, Allocator.Persistent);
+        if (!state1.IsCreated) state1 = new NativeArray<float>(Layer1, Allocator.Persistent);
+        if (!state2.IsCreated) state2 = new NativeArray<float>(Layer2, Allocator.Persistent);
 
         // [h0: w0..n], [h1: w0..wn]
-        weights10 = new float[Layer1 * Layer0];
-        weights21 = new float[Layer2 * Layer1];
+        if (!weights10.IsCreated) weights10 = new NativeArray<float>(Layer1 * Layer0, Allocator.Persistent);
+        if (!weights21.IsCreated) weights21 = new NativeArray<float>(Layer2 * Layer1, Allocator.Persistent);
     }
 
     public void Randomize()
@@ -234,7 +246,67 @@ public class Neural
             state0[i] = inputs[i];
     }
 
-    public void Step()
+    [BurstCompile(CompileSynchronously = true)]
+    private struct NeuralStepJob
+        : IJob
+    {
+        [ReadOnly] public int Layer0;
+        [ReadOnly] public int Layer1;
+        [ReadOnly] public int Layer2;
+        [ReadOnly] public NativeArray<float> bias0;
+        [ReadOnly] public NativeArray<float> bias1;
+        [ReadOnly] public NativeArray<float> bias2;
+        [ReadOnly] public NativeArray<float> state0;
+        public NativeArray<float> state1;
+        public NativeArray<float> state2;
+        [ReadOnly] public NativeArray<float> weights10;
+        [ReadOnly] public NativeArray<float> weights21;
+
+        public void Execute()
+        {
+            // layer 1 (hidden)
+            for (int i = 0; i < Layer1; ++i)
+            {
+                var bias = bias1[i];
+                var sum = 0.0f;
+                for (int j = 0; j < Layer0; ++j)
+                    sum += (state0[j] + bias0[j]) * weights10[i * Layer0 + j];
+                state1[i] = tanh(bias + sum);
+            }
+
+            // layer 2 (output)
+            for (int i = 0; i < Layer2; ++i)
+            {
+                var bias = bias2[i];
+                var sum = 0.0f;
+                for (int j = 0; j < Layer1; ++j)
+                    sum += (state1[j] + bias1[j]) * weights21[i * Layer1 + j];
+                state2[i] = tanh(bias + sum);
+            }
+        }
+    }
+
+    public JobHandle StepQueueJob()
+    {
+        var job = new NeuralStepJob()
+        {
+            Layer0 = this.Layer0,
+            Layer1 = this.Layer1,
+            Layer2 = this.Layer2,
+            bias0 = this.bias0,
+            bias1 = this.bias1,
+            bias2 = this.bias2,
+            state0 = this.state0,
+            state1 = this.state1,
+            state2 = this.state2,
+            weights10 = this.weights10,
+            weights21 = this.weights21,
+        };
+
+        return job.Schedule();
+    }
+
+    public void xStep()
     {
         UnityEngine.Profiling.Profiler.BeginSample("Neural.Step");
 
@@ -268,7 +340,7 @@ public class Neural
         //Debug.LogFormat("Neural.BackProp(): running...");
     }
 
-    public void LerpTowards(Neural from, float x)
+    public void LerpTowards(NeuralBurst from, float x)
     {
         for (int i = 0; i < Layer0; ++i)
             bias0[i] = Mathf.Lerp(bias0[i], from.bias0[i], x);
@@ -298,7 +370,7 @@ public class Neural
             weights21[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(weights21[i], randh(), x) : weights21[i];
     }
 
-    public void Evolve(Neural from, float x)
+    public void Evolve(NeuralBurst from, float x)
     {
         for (int i = 0; i < Layer0; ++i)
             bias0[i] = Random.Range(0.0f, 1.0f) < x ? from.bias0[i] : bias0[i];

@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Jobs;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -41,7 +42,7 @@ public class NeuralTrainerEvolution_Follow
     : MonoBehaviour
 {
     public Transform target;
-    public Neural source;
+    public NeuralBurst source;
 
     [System.NonSerialized] public float cycleTime = 5.0f;
 
@@ -58,26 +59,25 @@ public class NeuralTrainerEvolution_Follow
 
     public class TrainingResult
     {
-        public Neural trainee;
+        public NeuralBurst trainee;
         public float score;
     };
 
     private List<TrainingResult> results;
-    private List<Neural> trainees;
+    private List<NeuralBurst> trainees;
     private float bestScore;
 
     public void OnEnable()
     {
-        trainees = new List<Neural>();
+        trainees = new List<NeuralBurst>();
 
         for (int i = 0; i < 128; ++i)
         {
             var obj = GameObject.Instantiate(source.gameObject);
-            var neural = obj.GetComponent<Neural>();
+            var neural = obj.GetComponent<NeuralBurst>();
 
             neural.Automatic = false;
-            neural.Reset();
-            neural.Configure(6, 24, 4);
+            neural.Configure(6, 3200, 4);
             neural.Randomize();
 
             trainees.Add(neural);
@@ -179,6 +179,7 @@ public class NeuralTrainerEvolution_Follow
             }
 
             var counter = 0.0f;
+            var jobs = new JobHandle[trainees.Count];
 
             while (counter < cycleTime)
             {
@@ -196,8 +197,19 @@ public class NeuralTrainerEvolution_Follow
                             var trainee = trainees[i];
                             var result = results[i];
                             var dt = Time.fixedDeltaTime;
+                            var handle = QueueTrainingJob(trainee, dt);
 
-                            TickTraining(trainee, dt);
+                            jobs[i] = handle;
+                        }
+
+                        for (int i = 0; i < trainees.Count; ++i)
+                        {
+                            var trainee = trainees[i];
+                            var handle = jobs[i];
+
+                            handle.Complete();
+
+                            AfterTrainingJob(trainee, Time.fixedDeltaTime);
                         }
 
                         Physics.Simulate(Time.fixedDeltaTime);
@@ -218,8 +230,19 @@ public class NeuralTrainerEvolution_Follow
                     {
                         var trainee = trainees[i];
                         var result = results[i];
+                        var handle = QueueTrainingJob(trainee, Time.fixedDeltaTime);
 
-                        TickTraining(trainee, Time.fixedDeltaTime);
+                        jobs[i] = handle;
+                    }
+
+                    for (int i = 0; i < trainees.Count; ++i)
+                    {
+                        var trainee = trainees[i];
+                        var handle = jobs[i];
+
+                        handle.Complete();
+
+                        AfterTrainingJob(trainee, Time.fixedDeltaTime);
                     }
 
                     counter += Time.fixedDeltaTime;
@@ -292,7 +315,7 @@ public class NeuralTrainerEvolution_Follow
         }
     }
 
-    public void TickTraining(Neural trainee, float dt)
+    public JobHandle QueueTrainingJob(NeuralBurst trainee, float dt)
     {
         var traineeBody = trainee.GetComponent<Rigidbody>();
 
@@ -304,7 +327,12 @@ public class NeuralTrainerEvolution_Follow
         trainee.state0[4] = traineeBody.velocity.y;
         trainee.state0[5] = traineeBody.velocity.z;
 
-        trainee.Step();
+        return trainee.StepQueueJob();
+    }
+
+    public void AfterTrainingJob(NeuralBurst trainee, float dt)
+    {
+        var traineeBody = trainee.GetComponent<Rigidbody>();
 
         var brake = trainee.state2[3];
 
@@ -335,7 +363,7 @@ public class NeuralTrainerEvolution_Follow
         }
     }
 
-    public void CalculateResult(Neural trainee, TrainingResult result)
+    public void CalculateResult(NeuralBurst trainee, TrainingResult result)
     {
         var ofs = trainee.transform.position - target.transform.position;
         var lsq = ofs.sqrMagnitude;
