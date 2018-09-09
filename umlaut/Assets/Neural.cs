@@ -287,4 +287,19 @@ public class Neural
         for (int i = 0; i < Layer1 * Layer2; ++i)
             weights21[i] = Mathf.Lerp(weights21[i], randh(), x);
     }
+
+    public void Evolve(Neural from, float x)
+    {
+        for (int i = 0; i < Layer0; ++i)
+            bias0[i] = Random.Range(0.0f, 1.0f) < x ? bias0[i] : from.bias0[i];
+        for (int i = 0; i < Layer1; ++i)
+            bias1[i] = Random.Range(0.0f, 1.0f) < x ? bias1[i] : from.bias1[i];
+        for (int i = 0; i < Layer2; ++i)
+            bias2[i] = Random.Range(0.0f, 1.0f) < x ? bias2[i] : from.bias2[i];
+
+        for (int i = 0; i < Layer0 * Layer1; ++i)
+            weights10[i] = Random.Range(0.0f, 1.0f) < x ? weights10[i] : from.weights10[i];
+        for (int i = 0; i < Layer1 * Layer2; ++i)
+            weights21[i] = Random.Range(0.0f, 1.0f) < x ? weights21[i] : from.weights21[i];
+    }
 }

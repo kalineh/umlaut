@@ -25,6 +25,7 @@ public class NeuralTrainerEvolution_FollowEditor
 
         self.copyRate = EditorGUILayout.Slider("Copy Rate", self.copyRate, 0.0f, 1.0f);
         self.mutateRate = EditorGUILayout.Slider("Mutate Rate", self.mutateRate, 0.0f, 1.0f);
+        self.evolveRate = EditorGUILayout.Slider("Evolve Rate", self.evolveRate, 0.0f, 1.0f);
 
         self.hyper = EditorGUILayout.Toggle("Hyper", self.hyper);
         self.hyperSpeed = EditorGUILayout.IntSlider("Hyper Speed", self.hyperSpeed, 0, 50);
@@ -41,10 +42,11 @@ public class NeuralTrainerEvolution_Follow
     [System.NonSerialized] public float cycleTime = 5.0f;
 
     [System.NonSerialized] public bool hyper = false;
-    [System.NonSerialized] public int hyperSpeed = 10;
+    [System.NonSerialized] public int hyperSpeed = 5;
 
-    [System.NonSerialized] public float copyRate = 0.5f;
-    [System.NonSerialized] public float mutateRate = 0.1f;
+    [System.NonSerialized] public float copyRate = 0.75f;
+    [System.NonSerialized] public float mutateRate = 0.01f;
+    [System.NonSerialized] public float evolveRate = 0.05f;
 
     public class TrainingResult
     {
@@ -192,6 +194,7 @@ public class NeuralTrainerEvolution_Follow
             {
                 trainees[i].LerpTowards(winner.trainee, copyRate);
                 trainees[i].Mutate(mutateRate);
+                trainees[i].Evolve(winner.trainee, evolveRate);
             }
 
             for (int i = 0; i < trainees.Count; ++i)
@@ -230,7 +233,7 @@ public class NeuralTrainerEvolution_Follow
         //if (float.IsNaN(force.z)) force.z = 0.0f;
 
         // arbitrary speedup
-        force *= 10.0f;
+        force *= 100.0f;
 
         //traineeBody.AddForce(force * dt / Time.fixedDeltaTime, ForceMode.Acceleration);
         traineeBody.AddForce(force, ForceMode.Acceleration);
