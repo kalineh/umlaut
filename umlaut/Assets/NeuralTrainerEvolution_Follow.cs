@@ -21,8 +21,13 @@ public class NeuralTrainerEvolution_FollowEditor
         if (GUILayout.Button("Loop"))
             self.Loop();
 
-        self.mutateRate = EditorGUILayout.Slider("Mutate Rate", self.mutateRate, 0.0f, 1.0f);
+        self.cycleTime = EditorGUILayout.Slider("Cycle Time", self.cycleTime, 0.5f, 10.0f);
+
         self.copyRate = EditorGUILayout.Slider("Copy Rate", self.copyRate, 0.0f, 1.0f);
+        self.mutateRate = EditorGUILayout.Slider("Mutate Rate", self.mutateRate, 0.0f, 1.0f);
+
+        self.hyper = EditorGUILayout.Toggle("Hyper", self.hyper);
+        self.hyperSpeed = EditorGUILayout.IntSlider("Hyper Speed", self.hyperSpeed, 0, 50);
     }
 }
 #endif
@@ -33,13 +38,17 @@ public class NeuralTrainerEvolution_Follow
     public Transform target;
     public Neural source;
 
-    [System.NonSerialized] public float mutateRate = 0.25f;
-    [System.NonSerialized] public float copyRate = 0.25f;
+    [System.NonSerialized] public float cycleTime = 5.0f;
+
+    [System.NonSerialized] public bool hyper = false;
+    [System.NonSerialized] public int hyperSpeed = 10;
+
+    [System.NonSerialized] public float copyRate = 0.5f;
+    [System.NonSerialized] public float mutateRate = 0.1f;
 
     public class TrainingResult
     {
         public Neural trainee;
-        public bool done;
         public float score;
     };
 
@@ -80,7 +89,7 @@ public class NeuralTrainerEvolution_Follow
         results.Clear();
 
         for (int i = 0; i < trainees.Count; ++i)
-            results.Add(new TrainingResult() { trainee = trainees[i], done = false, score = 0.0f, });
+            results.Add(new TrainingResult() { trainee = trainees[i], score = 0.0f, });
     }
 
     private int CompareResults(TrainingResult lhs, TrainingResult rhs)
@@ -94,109 +103,146 @@ public class NeuralTrainerEvolution_Follow
 
     public IEnumerator RunTrainingLoop()
     {
-        while (true)
-            yield return RunTrainingIteration();
-    }
-
-    public IEnumerator RunTrainingIteration()
-    {
-        var steps = 100;
-
         Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): running...");
 
-        ClearResults();
+        var cycle = 0;
 
-        for (int i = 0; i < trainees.Count; ++i)
+        while (true)
         {
-            var trainee = trainees[i];
-            var result = results[i];
+            Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): cycle {0}", cycle++);
 
-            var position = Random.onUnitSphere * Random.Range(1.0f, 10.0f);
-            position.y = Random.Range(1.0f, 2.0f);
-            trainee.transform.position = position;
-            trainee.transform.rotation = Quaternion.LookRotation(Random.onUnitSphere);
+            ClearResults();
 
-            StartCoroutine(RunTraining(trainee, result, steps));
-        }
+            for (int i = 0; i < trainees.Count; ++i)
+            {
+                var trainee = trainees[i];
+                var result = results[i];
 
-        for (int i = 0; i < steps; ++i)
+                var direction = Random.onUnitSphere;
+                direction.y = 0.0f;
+                direction = direction.normalized;
+                var position = direction * Random.Range(10.0f, 20.0f);
+                position.y = Random.Range(1.0f, 2.0f);
+                trainee.transform.position = position;
+                trainee.transform.rotation = Quaternion.LookRotation(Random.onUnitSphere);
+            }
+
+            var counter = 0.0f;
+
+            while (counter < cycleTime)
+            {
+                if (hyper)
+                {
+                    Physics.autoSimulation = false;
+                    Time.timeScale = 1.0f * (float)hyperSpeed;
+
+                    for (int h = 0; h < hyperSpeed; ++h)
+                    {
+                        for (int i = 0; i < trainees.Count; ++i)
+                        {
+                            var trainee = trainees[i];
+                            var result = results[i];
+                            var dt = Time.fixedDeltaTime;
+
+                            TickTraining(trainee, dt);
+                        }
+
+                        Physics.Simulate(Time.fixedDeltaTime);
+                    }
+
+                    counter += Time.fixedDeltaTime * Time.timeScale;
+
+                    yield return new WaitForFixedUpdate();
+                }
+                else
+                {
+                    Physics.autoSimulation = true;
+                    Time.timeScale = 1.0f;
+
+                    for (int i = 0; i < trainees.Count; ++i)
+                    {
+                        var trainee = trainees[i];
+                        var result = results[i];
+
+                        TickTraining(trainee, Time.fixedDeltaTime);
+                    }
+
+                    counter += Time.fixedDeltaTime;
+
+                    yield return new WaitForFixedUpdate();
+                }
+            }
+
+            for (int i = 0; i < trainees.Count; ++i)
+            {
+                var trainee = trainees[i];
+                var result = results[i];
+
+                CalculateResult(trainee, result);
+            }
+
+            results.Sort(CompareResults);
+
+            var winner = results[0];
+
+            Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): winner: {0}: score: {1}", winner.trainee.name, winner.score);
+            Debug.LogFormat("");
+
+            for (int i = 0; i < trainees.Count; ++i)
+            {
+                trainees[i].LerpTowards(winner.trainee, copyRate);
+                trainees[i].Mutate(mutateRate);
+            }
+
+            for (int i = 0; i < trainees.Count; ++i)
+                trainees[i].GetComponent<Rigidbody>().isKinematic = true;
             yield return null;
+            for (int i = 0; i < trainees.Count; ++i)
+                trainees[i].GetComponent<Rigidbody>().isKinematic = false;
 
-        // wait for complete
-        yield return null;
-        yield return null;
-        yield return null;
-        yield return null;
-
-        results.Sort(CompareResults);
-
-        var winner = results[0];
-
-        Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): winner: {0}: score: {1}", winner.trainee.name, winner.score);
-        Debug.LogFormat("");
-
-        for (int i = 0; i < trainees.Count; ++i)
-        {
-            trainees[i].LerpTowards(winner.trainee, copyRate);
-            trainees[i].Mutate(mutateRate);
+            yield return null;
         }
     }
 
-    public IEnumerator RunTraining(Neural trainee, TrainingResult results, int steps)
+    public void TickTraining(Neural trainee, float dt)
     {
-        Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTraining(): {0}", trainee.name);
-
-        var position = trainee.transform.position;
-        var rotation = trainee.transform.rotation;
-
         var input = new float[6];
         var traineeBody = trainee.GetComponent<Rigidbody>();
 
-        for (int i = 0; i < steps; ++i)
-        {
-            input[0] = trainee.transform.position.x;
-            input[1] = trainee.transform.position.y;
-            input[2] = trainee.transform.position.z;
+        trainee.state0[0] = trainee.transform.position.x;
+        trainee.state0[1] = trainee.transform.position.y;
+        trainee.state0[2] = trainee.transform.position.z;
 
-            input[3] = target.transform.position.x;
-            input[4] = target.transform.position.y;
-            input[5] = target.transform.position.z;
+        trainee.state0[3] = target.transform.position.x;
+        trainee.state0[4] = target.transform.position.y;
+        trainee.state0[5] = target.transform.position.z;
 
-            trainee.SetInputs(input);
-            trainee.Step();
+        trainee.Step();
 
-            yield return null;
+        var force = new Vector3(
+            trainee.state2[0],
+            trainee.state2[1],
+            trainee.state2[2]
+        );
 
-            var force = new Vector3(
-                trainee.state2[0],
-                trainee.state2[1],
-                trainee.state2[2]
-            );
+        //if (float.IsNaN(force.x)) force.x = 0.0f;
+        //if (float.IsNaN(force.y)) force.y = 0.0f;
+        //if (float.IsNaN(force.z)) force.z = 0.0f;
 
-            traineeBody.AddForce(force / Time.fixedDeltaTime, ForceMode.Acceleration);
+        // arbitrary speedup
+        force *= 10.0f;
 
-            Debug.DrawLine(traineeBody.position, traineeBody.position + force * 2.0f, Color.red, 0.1f, true);
-        }
+        //traineeBody.AddForce(force * dt / Time.fixedDeltaTime, ForceMode.Acceleration);
+        traineeBody.AddForce(force, ForceMode.Acceleration);
 
+        //Debug.DrawLine(traineeBody.position, traineeBody.position + force * 2.0f, Color.red, 0.1f, true);
+    }
+
+    public void CalculateResult(Neural trainee, TrainingResult result)
+    {
         var ofs = trainee.transform.position - target.transform.position;
         var lsq = ofs.sqrMagnitude;
 
-        results.score = lsq;
-        results.done = true;
-
-        trainee.transform.position = position;
-        trainee.transform.rotation = rotation;
-
-        traineeBody.velocity = Vector3.zero;
-        traineeBody.angularVelocity = Vector3.zero;
-        traineeBody.isKinematic = true;
-
-        yield return null;
-
-        traineeBody.isKinematic = false;
-
-        Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTraining(): {0}: score {1}", trainee.name, results.score);
-
-        yield break;
+        result.score = lsq;
     }
 }

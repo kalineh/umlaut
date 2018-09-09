@@ -226,6 +226,8 @@ public class Neural
 
     public void Step()
     {
+        UnityEngine.Profiling.Profiler.BeginSample("Neural.Step");
+
         //Debug.LogFormat("Neural.Step(): running...");
 
         // layer 1 (hidden)
@@ -247,6 +249,8 @@ public class Neural
                 sum += (state1[j] + bias1[j]) * weights21[i * Layer1 + j];
             state2[i] = tanh(bias + sum);
         }
+
+        UnityEngine.Profiling.Profiler.EndSample();
     }
 
     public void BackProp()
