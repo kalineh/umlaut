@@ -13,6 +13,9 @@ public class NeuralEditor
     private bool showLayer1;
     private bool showLayer2;
 
+    private bool showWeights10;
+    private bool showWeights21;
+
     public override void OnInspectorGUI()
     {
         base.OnInspectorGUI();
@@ -44,12 +47,15 @@ public class NeuralEditor
         showLayer1 = GUILayout.Toggle(showLayer1, "Show Layer 1");
         showLayer2 = GUILayout.Toggle(showLayer2, "Show Layer 2");
 
+        showWeights10 = GUILayout.Toggle(showWeights10, "Show Weights 1-0");
+        showWeights21 = GUILayout.Toggle(showWeights21, "Show Weights 2-1");
+
         if (showLayer0)
         {
             EditorGUILayout.Separator();
 
             for (int i = 0; i < self.Layer0; ++i)
-                GUILayout.Label(string.Format("L0: {0:00}: {1}", i, self.bias0[i]));
+                GUILayout.Label(string.Format("L0: {0:00}: {1,7:F4}", i, self.bias0[i]));
         }
 
         if (showLayer1)
@@ -57,7 +63,7 @@ public class NeuralEditor
             EditorGUILayout.Separator();
 
             for (int i = 0; i < self.Layer1; ++i)
-                GUILayout.Label(string.Format("L1: {0:00}: {1}", i, self.bias1[i]));
+                GUILayout.Label(string.Format("L1: {0:00}, {1,7:F4}", i, self.bias1[i]));
         }
 
         if (showLayer2)
@@ -65,8 +71,38 @@ public class NeuralEditor
             EditorGUILayout.Separator();
 
             for (int i = 0; i < self.Layer2; ++i)
-                GUILayout.Label(string.Format("L2: {0:00}: {1}", i, self.bias2[i]));
+                GUILayout.Label(string.Format("L2: {0:00}, {1,7:F4}", i, self.bias2[i]));
         }
+
+        if (showWeights10)
+        {
+            EditorGUILayout.Separator();
+
+            for (int i = 0; i < self.Layer1; ++i)
+            {
+                var label = string.Format("L1: {0:00}, {1,7:F4}", i, self.bias1[i]);
+
+                for (int j = 0; j < self.Layer0; ++j)
+                    label += string.Format("{0,7:F3},", self.weights10[i * self.Layer0 + j]);
+
+                GUILayout.Label(label);
+            }
+        }
+        if (showWeights21)
+        {
+            EditorGUILayout.Separator();
+
+            for (int i = 0; i < self.Layer2; ++i)
+            {
+                var label = string.Format("L2: {0:00}, {1,7:F4}", i, self.bias2[i]);
+
+                for (int j = 0; j < self.Layer1; ++j)
+                    label += string.Format("{0,7:F3},", self.weights21[i * self.Layer1 + j]);
+
+                GUILayout.Label(label);
+            }
+        }
+
     }
 }
 #endif
@@ -199,7 +235,7 @@ public class Neural
             var sum = 0.0f;
             for (int j = 0; j < Layer0; ++j)
                 sum += (state0[j] + bias0[j]) * weights10[i * Layer0 + j];
-            state1[i] = sigm(bias + sum);
+            state1[i] = tanh(bias + sum);
         }
 
         // layer 2 (output)
@@ -209,7 +245,7 @@ public class Neural
             var sum = 0.0f;
             for (int j = 0; j < Layer1; ++j)
                 sum += (state1[j] + bias1[j]) * weights21[i * Layer1 + j];
-            state2[i] = sigm(bias + sum);
+            state2[i] = tanh(bias + sum);
         }
     }
 
@@ -231,5 +267,20 @@ public class Neural
             weights10[i] = Mathf.Lerp(weights10[i], from.weights10[i], x);
         for (int i = 0; i < Layer1 * Layer2; ++i)
             weights21[i] = Mathf.Lerp(weights21[i], from.weights21[i], x);
+    }
+
+    public void Mutate(float x)
+    {
+        for (int i = 0; i < Layer0; ++i)
+            bias0[i] = Mathf.Lerp(bias0[i], randh(), x);
+        for (int i = 0; i < Layer1; ++i)
+            bias1[i] = Mathf.Lerp(bias1[i], randh(), x);
+        for (int i = 0; i < Layer2; ++i)
+            bias2[i] = Mathf.Lerp(bias2[i], randh(), x);
+
+        for (int i = 0; i < Layer0 * Layer1; ++i)
+            weights10[i] = Mathf.Lerp(weights10[i], randh(), x);
+        for (int i = 0; i < Layer1 * Layer2; ++i)
+            weights21[i] = Mathf.Lerp(weights21[i], randh(), x);
     }
 }

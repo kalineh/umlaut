@@ -18,10 +18,11 @@ public class NeuralTrainerEvolution_FollowEditor
 
         var self = target as NeuralTrainerEvolution_Follow;
 
-        if (GUILayout.Button("Run"))
-            self.Run();
         if (GUILayout.Button("Loop"))
             self.Loop();
+
+        self.mutateRate = EditorGUILayout.Slider("Mutate Rate", self.mutateRate, 0.0f, 1.0f);
+        self.copyRate = EditorGUILayout.Slider("Copy Rate", self.copyRate, 0.0f, 1.0f);
     }
 }
 #endif
@@ -30,7 +31,10 @@ public class NeuralTrainerEvolution_Follow
     : MonoBehaviour
 {
     public Transform target;
-    public List<Neural> trainees;
+    public Neural source;
+
+    [System.NonSerialized] public float mutateRate = 0.25f;
+    [System.NonSerialized] public float copyRate = 0.25f;
 
     public class TrainingResult
     {
@@ -40,23 +44,28 @@ public class NeuralTrainerEvolution_Follow
     };
 
     private List<TrainingResult> results;
+    private List<Neural> trainees;
 
     public void OnEnable()
     {
-        foreach (var trainee in trainees)
+        trainees = new List<Neural>();
+
+        for (int i = 0; i < 256; ++i)
         {
-            trainee.Automatic = false;
-            trainee.Reset();
-            trainee.Configure(6, 12, 3);
-            trainee.Randomize();
+            var obj = GameObject.Instantiate(source.gameObject);
+            var neural = obj.GetComponent<Neural>();
+
+            neural.Automatic = false;
+            neural.Reset();
+            neural.Configure(6, 24, 3);
+            neural.Randomize();
+
+            trainees.Add(neural);
         }
 
-        Run();
-    }
+        source.gameObject.SetActive(false);
 
-    public void Run()
-    {
-        StartCoroutine(RunTrainingIteration());
+        Loop();
     }
 
     public void Loop()
@@ -102,6 +111,11 @@ public class NeuralTrainerEvolution_Follow
             var trainee = trainees[i];
             var result = results[i];
 
+            var position = Random.onUnitSphere * Random.Range(1.0f, 10.0f);
+            position.y = Random.Range(1.0f, 2.0f);
+            trainee.transform.position = position;
+            trainee.transform.rotation = Quaternion.LookRotation(Random.onUnitSphere);
+
             StartCoroutine(RunTraining(trainee, result, steps));
         }
 
@@ -122,7 +136,10 @@ public class NeuralTrainerEvolution_Follow
         Debug.LogFormat("");
 
         for (int i = 0; i < trainees.Count; ++i)
-            trainees[i].LerpTowards(winner.trainee, 0.1f);
+        {
+            trainees[i].LerpTowards(winner.trainee, copyRate);
+            trainees[i].Mutate(mutateRate);
+        }
     }
 
     public IEnumerator RunTraining(Neural trainee, TrainingResult results, int steps)
@@ -157,6 +174,8 @@ public class NeuralTrainerEvolution_Follow
             );
 
             traineeBody.AddForce(force / Time.fixedDeltaTime, ForceMode.Acceleration);
+
+            Debug.DrawLine(traineeBody.position, traineeBody.position + force * 2.0f, Color.red, 0.1f, true);
         }
 
         var ofs = trainee.transform.position - target.transform.position;
