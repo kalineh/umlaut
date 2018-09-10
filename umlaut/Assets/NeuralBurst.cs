@@ -4,6 +4,7 @@ using UnityEngine;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -111,22 +112,6 @@ public class NeuralBurstEditor
 public class NeuralBurst
     : MonoBehaviour
 {
-    public virtual void OnEnable()
-    {
-        if (Automatic)
-        {
-            Configure(6, 12, 4);
-            Randomize();
-            RandomizeInputs();
-        }
-    }
-
-    public virtual void Update()
-    {
-        if (Automatic)
-            StepQueueJob();
-    }
-
     private void OnDestroy()
     {
         if (bias0.IsCreated) bias0.Dispose();
@@ -141,8 +126,8 @@ public class NeuralBurst
         if (weights21.IsCreated) weights21.Dispose();
     }
 
-    private static float rand01() { return Random.Range(0.0f, 1.0f); }
-    private static float randh() { return Random.Range(-0.5f, 0.5f); }
+    private static float rand01() { return UnityEngine.Random.Range(0.0f, 1.0f); }
+    private static float randh() { return UnityEngine.Random.Range(-0.5f, 0.5f); }
     private static float sigm(float x) { return x / (1.0f - Mathf.Exp(-x)); }
     private static float deriv(float x) { return sigm(x) * (1.0f - sigm(x)); }
     private static float tanh_slow(float x) { return (float)System.Math.Tanh((float)x); }
@@ -286,7 +271,7 @@ public class NeuralBurst
         }
     }
 
-    public JobHandle StepQueueJob()
+    public JobHandle QueueJobStep()
     {
         var job = new NeuralStepJob()
         {
@@ -306,39 +291,11 @@ public class NeuralBurst
         return job.Schedule();
     }
 
-    public void xStep()
-    {
-        UnityEngine.Profiling.Profiler.BeginSample("Neural.Step");
-
-        //Debug.LogFormat("Neural.Step(): running...");
-
-        // layer 1 (hidden)
-        for (int i = 0; i < Layer1; ++i)
-        {
-            var bias = bias1[i];
-            var sum = 0.0f;
-            for (int j = 0; j < Layer0; ++j)
-                sum += (state0[j] + bias0[j]) * weights10[i * Layer0 + j];
-            state1[i] = tanh(bias + sum);
-        }
-
-        // layer 2 (output)
-        for (int i = 0; i < Layer2; ++i)
-        {
-            var bias = bias2[i];
-            var sum = 0.0f;
-            for (int j = 0; j < Layer1; ++j)
-                sum += (state1[j] + bias1[j]) * weights21[i * Layer1 + j];
-            state2[i] = tanh(bias + sum);
-        }
-
-        UnityEngine.Profiling.Profiler.EndSample();
-    }
-
     public void BackProp()
     {
         //Debug.LogFormat("Neural.BackProp(): running...");
     }
+
 
     public void LerpTowards(NeuralBurst from, float x)
     {
@@ -355,33 +312,151 @@ public class NeuralBurst
             weights21[i] = Mathf.Lerp(weights21[i], from.weights21[i], x);
     }
 
+    [BurstCompile(CompileSynchronously = true)]
+    private struct MutateJob
+        : IJob
+    {
+        [ReadOnly] public uint Seed;
+        [ReadOnly] public float MutateRate;
+        [ReadOnly] public int Layer0;
+        [ReadOnly] public int Layer1;
+        [ReadOnly] public int Layer2;
+        public NativeArray<float> bias0;
+        public NativeArray<float> bias1;
+        public NativeArray<float> bias2;
+        public NativeArray<float> weights10;
+        public NativeArray<float> weights21;
+
+        public void Execute()
+        {
+            var r = new Unity.Mathematics.Random(Seed);
+
+            for (int i = 0; i < Layer0; ++i)
+                bias0[i] = math.select(bias0[i], r.NextFloat(-0.5f, 0.5f), r.NextFloat() < MutateRate);
+            for (int i = 0; i < Layer1; ++i)
+                bias1[i] = math.select(bias1[i], r.NextFloat(-0.5f, 0.5f), r.NextFloat() < MutateRate);
+            for (int i = 0; i < Layer2; ++i)
+                bias2[i] = math.select(bias2[i], r.NextFloat(-0.5f, 0.5f), r.NextFloat() < MutateRate);
+
+            for (int i = 0; i < Layer0 * Layer1; ++i)
+                weights10[i] = math.select(weights10[i], r.NextFloat(-0.5f, 0.5f), r.NextFloat() < MutateRate);
+            for (int i = 0; i < Layer1 * Layer2; ++i)
+                weights21[i] = math.select(weights21[i], r.NextFloat(-0.5f, 0.5f), r.NextFloat() < MutateRate);
+        }
+    }
+
+    public JobHandle QueueJobMutate(uint seed, float mutateRate)
+    {
+        var job = new MutateJob()
+        {
+            Seed = seed,
+            MutateRate = mutateRate,
+            Layer0 = this.Layer0,
+            Layer1 = this.Layer1,
+            Layer2 = this.Layer2,
+            bias0 = this.bias0,
+            bias1 = this.bias1,
+            bias2 = this.bias2,
+            weights10 = this.weights10,
+            weights21 = this.weights21,
+        };
+
+        return job.Schedule();
+    }
+
     public void Mutate(float x)
     {
         for (int i = 0; i < Layer0; ++i)
-            bias0[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias0[i], randh(), x) : bias0[i];
+            bias0[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias0[i], randh(), x) : bias0[i];
         for (int i = 0; i < Layer1; ++i)
-            bias1[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias1[i], randh(), x) : bias1[i];
+            bias1[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias1[i], randh(), x) : bias1[i];
         for (int i = 0; i < Layer2; ++i)
-            bias2[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias2[i], randh(), x) : bias2[i];
+            bias2[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(bias2[i], randh(), x) : bias2[i];
 
         for (int i = 0; i < Layer0 * Layer1; ++i)
-            weights10[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(weights10[i], randh(), x) : weights10[i];
+            weights10[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(weights10[i], randh(), x) : weights10[i];
         for (int i = 0; i < Layer1 * Layer2; ++i)
-            weights21[i] = Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(weights21[i], randh(), x) : weights21[i];
+            weights21[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? Mathf.Lerp(weights21[i], randh(), x) : weights21[i];
+    }
+
+    [BurstCompile(CompileSynchronously = true)]
+    private struct EvolveJob
+        : IJob
+    {
+        [ReadOnly] public uint Seed;
+
+        [ReadOnly] public float EvolveRate;
+
+        [ReadOnly] public int Layer0;
+        [ReadOnly] public int Layer1;
+        [ReadOnly] public int Layer2;
+
+        [ReadOnly] public NativeArray<float> from_bias0;
+        [ReadOnly] public NativeArray<float> from_bias1;
+        [ReadOnly] public NativeArray<float> from_bias2;
+        [ReadOnly] public NativeArray<float> from_weights10;
+        [ReadOnly] public NativeArray<float> from_weights21;
+
+        public NativeArray<float> bias0;
+        public NativeArray<float> bias1;
+        public NativeArray<float> bias2;
+        public NativeArray<float> weights10;
+        public NativeArray<float> weights21;
+
+        public void Execute()
+        {
+            var r = new Unity.Mathematics.Random(Seed);
+
+            for (int i = 0; i < Layer0; ++i)
+                bias0[i] = math.select(bias0[i], from_bias0[i], r.NextFloat() < EvolveRate);
+            for (int i = 0; i < Layer1; ++i)
+                bias1[i] = math.select(bias1[i], from_bias1[i], r.NextFloat() < EvolveRate);
+            for (int i = 0; i < Layer2; ++i)
+                bias2[i] = math.select(bias2[i], from_bias2[i], r.NextFloat() < EvolveRate);
+
+            for (int i = 0; i < Layer0 * Layer1; ++i)
+                weights10[i] = math.select(weights10[i], from_weights10[i], r.NextFloat() < EvolveRate);
+            for (int i = 0; i < Layer1 * Layer2; ++i)
+                weights21[i] = math.select(weights21[i], from_weights21[i], r.NextFloat() < EvolveRate);
+        }
+    }
+
+    public JobHandle QueueJobEvolve(uint seed, NeuralBurst from, float evolveRate, JobHandle dependency)
+    {
+        var job = new EvolveJob()
+        {
+            Seed = seed,
+            EvolveRate = evolveRate,
+            Layer0 = this.Layer0,
+            Layer1 = this.Layer1,
+            Layer2 = this.Layer2,
+            from_bias0 = from.bias0,
+            from_bias1 = from.bias1,
+            from_bias2 = from.bias2,
+            from_weights10 = from.weights10,
+            from_weights21 = from.weights21,
+            bias0 = this.bias0,
+            bias1 = this.bias1,
+            bias2 = this.bias2,
+            weights10 = this.weights10,
+            weights21 = this.weights21,
+        };
+
+        return job.Schedule(dependency);
     }
 
     public void Evolve(NeuralBurst from, float x)
     {
         for (int i = 0; i < Layer0; ++i)
-            bias0[i] = Random.Range(0.0f, 1.0f) < x ? from.bias0[i] : bias0[i];
+            bias0[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? from.bias0[i] : bias0[i];
         for (int i = 0; i < Layer1; ++i)
-            bias1[i] = Random.Range(0.0f, 1.0f) < x ? from.bias1[i] : bias1[i];
+            bias1[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? from.bias1[i] : bias1[i];
         for (int i = 0; i < Layer2; ++i)
-            bias2[i] = Random.Range(0.0f, 1.0f) < x ? from.bias2[i] : bias2[i];
+            bias2[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? from.bias2[i] : bias2[i];
 
         for (int i = 0; i < Layer0 * Layer1; ++i)
-            weights10[i] = Random.Range(0.0f, 1.0f) < x ? from.weights10[i] : weights10[i];
+            weights10[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? from.weights10[i] : weights10[i];
         for (int i = 0; i < Layer1 * Layer2; ++i)
-            weights21[i] = Random.Range(0.0f, 1.0f) < x ? from.weights21[i] : weights21[i];
+            weights21[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? from.weights21[i] : weights21[i];
     }
 }

@@ -29,7 +29,7 @@ public class NeuralTrainerEvolution_FollowEditor
         self.evolveRate = EditorGUILayout.Slider("Evolve Rate", self.evolveRate, 0.0f, 1.0f);
 
         self.hyper = EditorGUILayout.Toggle("Hyper", self.hyper);
-        self.hyperSpeed = EditorGUILayout.IntSlider("Hyper Speed", self.hyperSpeed, 1, 50);
+        self.hyperSpeed = EditorGUILayout.IntSlider("Hyper Speed", self.hyperSpeed, 1, 100);
 
         self.trainingPhase = EditorGUILayout.IntSlider("Training Phase", self.trainingPhase, 0, 5);
 
@@ -49,9 +49,9 @@ public class NeuralTrainerEvolution_Follow
     [System.NonSerialized] public bool hyper = false;
     [System.NonSerialized] public int hyperSpeed = 5;
 
-    [System.NonSerialized] public float copyRate = 0.01f;
+    [System.NonSerialized] public float copyRate = 0.0f;
     [System.NonSerialized] public float mutateRate = 0.01f;
-    [System.NonSerialized] public float evolveRate = 0.05f;
+    [System.NonSerialized] public float evolveRate = 0.90f;
 
     [System.NonSerialized] public int trainingPhase = 0;
 
@@ -71,13 +71,13 @@ public class NeuralTrainerEvolution_Follow
     {
         trainees = new List<NeuralBurst>();
 
-        for (int i = 0; i < 128; ++i)
+        for (int i = 0; i < 64; ++i)
         {
             var obj = GameObject.Instantiate(source.gameObject);
             var neural = obj.GetComponent<NeuralBurst>();
 
             neural.Automatic = false;
-            neural.Configure(6, 3200, 4);
+            neural.Configure(6, 128, 4);
             neural.Randomize();
 
             trainees.Add(neural);
@@ -200,6 +200,9 @@ public class NeuralTrainerEvolution_Follow
                             var handle = QueueTrainingJob(trainee, dt);
 
                             jobs[i] = handle;
+
+                            if ((i % 8) == 0)
+                                JobHandle.ScheduleBatchedJobs();
                         }
 
                         for (int i = 0; i < trainees.Count; ++i)
@@ -217,7 +220,7 @@ public class NeuralTrainerEvolution_Follow
 
                     counter += Time.fixedDeltaTime * Time.timeScale;
 
-                    yield return new WaitForFixedUpdate();
+                    yield return null;
                 }
                 else
                 {
@@ -226,6 +229,8 @@ public class NeuralTrainerEvolution_Follow
 
                     TickPhase(Time.fixedDeltaTime);
 
+                    UnityEngine.Profiling.Profiler.BeginSample("QueueTrainingJobs");
+
                     for (int i = 0; i < trainees.Count; ++i)
                     {
                         var trainee = trainees[i];
@@ -233,7 +238,14 @@ public class NeuralTrainerEvolution_Follow
                         var handle = QueueTrainingJob(trainee, Time.fixedDeltaTime);
 
                         jobs[i] = handle;
+
+                        if ((i % 8) == 0)
+                            JobHandle.ScheduleBatchedJobs();
                     }
+
+                    UnityEngine.Profiling.Profiler.EndSample();
+
+                    UnityEngine.Profiling.Profiler.BeginSample("AfterTrainingJobs");
 
                     for (int i = 0; i < trainees.Count; ++i)
                     {
@@ -244,6 +256,8 @@ public class NeuralTrainerEvolution_Follow
 
                         AfterTrainingJob(trainee, Time.fixedDeltaTime);
                     }
+
+                    UnityEngine.Profiling.Profiler.EndSample();
 
                     counter += Time.fixedDeltaTime;
 
@@ -271,15 +285,27 @@ public class NeuralTrainerEvolution_Follow
                 Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): winner: {0}: score: {1}", winner.trainee.name, winner.score);
                 Debug.LogFormat("");
 
+                var seed = (uint)(Time.frameCount);
+                var mutateJobs = new JobHandle[trainees.Count];
+                var evolveJobs = new JobHandle[trainees.Count];
+
                 for (int i = 0; i < trainees.Count; ++i)
                 {
                     if (trainees[i] == winner.trainee)
                         continue;
 
-                    trainees[i].LerpTowards(winner.trainee, copyRate);
-                    trainees[i].Mutate(mutateRate);
-                    trainees[i].Evolve(winner.trainee, evolveRate);
+                    var jobMutate = trainees[i].QueueJobMutate(seed, mutateRate);
+                    var jobEvolve = trainees[i].QueueJobEvolve(seed, winner.trainee, evolveRate, jobMutate);
+
+                    mutateJobs[i] = jobMutate;
+                    evolveJobs[i] = jobEvolve;
+
+                    if ((i % 8) == 0)
+                        JobHandle.ScheduleBatchedJobs();
                 }
+
+                for (int i = 0; i < trainees.Count; ++i)
+                    evolveJobs[i].Complete();
             }
             else
             {
@@ -288,8 +314,24 @@ public class NeuralTrainerEvolution_Follow
                 Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): no winner, skipping (best score: {0})", bestScore);
                 Debug.LogFormat("");
 
+                var seed = (uint)(Time.frameCount);
+                var mutateJobs = new JobHandle[trainees.Count];
+
                 for (int i = 0; i < trainees.Count; ++i)
-                    trainees[i].Mutate(mutateRate);
+                {
+                    if (trainees[i] == winner.trainee)
+                        continue;
+
+                    var jobMutate = trainees[i].QueueJobMutate(seed, mutateRate);
+
+                    mutateJobs[i] = jobMutate;
+
+                    if ((i % 8) == 0)
+                        JobHandle.ScheduleBatchedJobs();
+                }
+
+                for (int i = 0; i < trainees.Count; ++i)
+                    mutateJobs[i].Complete();
             }
 
             for (int i = 0; i < trainees.Count; ++i)
@@ -327,7 +369,7 @@ public class NeuralTrainerEvolution_Follow
         trainee.state0[4] = traineeBody.velocity.y;
         trainee.state0[5] = traineeBody.velocity.z;
 
-        return trainee.StepQueueJob();
+        return trainee.QueueJobStep();
     }
 
     public void AfterTrainingJob(NeuralBurst trainee, float dt)
