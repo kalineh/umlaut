@@ -232,7 +232,7 @@ public class NeuralBurst
     }
 
     [BurstCompile(CompileSynchronously = true)]
-    private struct NeuralStepJob
+    public struct StepJob
         : IJob
     {
         [ReadOnly] public int Layer0;
@@ -271,9 +271,9 @@ public class NeuralBurst
         }
     }
 
-    public JobHandle QueueJobStep()
+    public StepJob QueueJobStep()
     {
-        var job = new NeuralStepJob()
+        var job = new StepJob()
         {
             Layer0 = this.Layer0,
             Layer1 = this.Layer1,
@@ -288,7 +288,7 @@ public class NeuralBurst
             weights21 = this.weights21,
         };
 
-        return job.Schedule();
+        return job;
     }
 
     public void BackProp()
@@ -313,7 +313,7 @@ public class NeuralBurst
     }
 
     [BurstCompile(CompileSynchronously = true)]
-    private struct MutateJob
+    public struct MutateJob
         : IJob
     {
         [ReadOnly] public uint Seed;
@@ -345,7 +345,7 @@ public class NeuralBurst
         }
     }
 
-    public JobHandle QueueJobMutate(uint seed, float mutateRate)
+    public MutateJob QueueJobMutate(uint seed, float mutateRate)
     {
         var job = new MutateJob()
         {
@@ -361,7 +361,7 @@ public class NeuralBurst
             weights21 = this.weights21,
         };
 
-        return job.Schedule();
+        return job;
     }
 
     public void Mutate(float x)
@@ -380,7 +380,7 @@ public class NeuralBurst
     }
 
     [BurstCompile(CompileSynchronously = true)]
-    private struct EvolveJob
+    public struct EvolveJob
         : IJob
     {
         [ReadOnly] public uint Seed;
@@ -421,7 +421,7 @@ public class NeuralBurst
         }
     }
 
-    public JobHandle QueueJobEvolve(uint seed, NeuralBurst from, float evolveRate, JobHandle dependency)
+    public EvolveJob QueueJobEvolve(uint seed, NeuralBurst from, float evolveRate)
     {
         var job = new EvolveJob()
         {
@@ -442,7 +442,7 @@ public class NeuralBurst
             weights21 = this.weights21,
         };
 
-        return job.Schedule(dependency);
+        return job;
     }
 
     public void Evolve(NeuralBurst from, float x)

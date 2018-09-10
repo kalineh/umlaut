@@ -65,7 +65,9 @@ public class NeuralTrainerEvolution_Follow
 
     private List<TrainingResult> results;
     private List<NeuralBurst> trainees;
+
     private float bestScore;
+    private NeuralBurst bestTrainee;
 
     public void OnEnable()
     {
@@ -74,10 +76,13 @@ public class NeuralTrainerEvolution_Follow
         for (int i = 0; i < 64; ++i)
         {
             var obj = GameObject.Instantiate(source.gameObject);
+
+            obj.name = string.Format("{0}-{1}", source.gameObject.name, i);
+
             var neural = obj.GetComponent<NeuralBurst>();
 
             neural.Automatic = false;
-            neural.Configure(6, 128, 4);
+            neural.Configure(6, 2048, 4);
             neural.Randomize();
 
             trainees.Add(neural);
@@ -118,10 +123,15 @@ public class NeuralTrainerEvolution_Follow
 
         var cycle = 0;
 
+        bestScore = float.MaxValue;
+        bestTrainee = (NeuralBurst)null;
+
+        var stepJobs = new List<JobHandle>(trainees.Count);
+        var mutateJobs = new List<JobHandle>(trainees.Count);
+        var evolveJobs = new List<JobHandle>(trainees.Count);
+
         while (true)
         {
-            Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): cycle {0}", cycle++);
-
             ClearResults();
 
             var worldOffset = Vector3.zero;
@@ -179,7 +189,6 @@ public class NeuralTrainerEvolution_Follow
             }
 
             var counter = 0.0f;
-            var jobs = new JobHandle[trainees.Count];
 
             while (counter < cycleTime)
             {
@@ -197,9 +206,9 @@ public class NeuralTrainerEvolution_Follow
                             var trainee = trainees[i];
                             var result = results[i];
                             var dt = Time.fixedDeltaTime;
-                            var handle = QueueTrainingJob(trainee, dt);
+                            var job = PrepareAndQueueJobStep(trainee, dt);
 
-                            jobs[i] = handle;
+                           stepJobs.Add(job.Schedule());
 
                             if ((i % 8) == 0)
                                 JobHandle.ScheduleBatchedJobs();
@@ -208,12 +217,14 @@ public class NeuralTrainerEvolution_Follow
                         for (int i = 0; i < trainees.Count; ++i)
                         {
                             var trainee = trainees[i];
-                            var handle = jobs[i];
+                            var handle = stepJobs[i];
 
                             handle.Complete();
 
                             AfterTrainingJob(trainee, Time.fixedDeltaTime);
                         }
+
+                        stepJobs.Clear();
 
                         Physics.Simulate(Time.fixedDeltaTime);
                     }
@@ -235,9 +246,9 @@ public class NeuralTrainerEvolution_Follow
                     {
                         var trainee = trainees[i];
                         var result = results[i];
-                        var handle = QueueTrainingJob(trainee, Time.fixedDeltaTime);
+                        var job = PrepareAndQueueJobStep(trainee, Time.fixedDeltaTime);
 
-                        jobs[i] = handle;
+                        stepJobs.Add(job.Schedule());
 
                         if ((i % 8) == 0)
                             JobHandle.ScheduleBatchedJobs();
@@ -250,12 +261,14 @@ public class NeuralTrainerEvolution_Follow
                     for (int i = 0; i < trainees.Count; ++i)
                     {
                         var trainee = trainees[i];
-                        var handle = jobs[i];
+                        var handle = stepJobs[i];
 
                         handle.Complete();
 
                         AfterTrainingJob(trainee, Time.fixedDeltaTime);
                     }
+
+                    stepJobs.Clear();
 
                     UnityEngine.Profiling.Profiler.EndSample();
 
@@ -280,65 +293,52 @@ public class NeuralTrainerEvolution_Follow
             var winner = results[0];
             if (winner.score < bestScore)
             {
+                Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): cycle {0} +++ new winner: {1}: score: {2}", cycle, winner.trainee.name, winner.score);
+
                 bestScore = winner.score;
-
-                Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): winner: {0}: score: {1}", winner.trainee.name, winner.score);
-                Debug.LogFormat("");
-
-                var seed = (uint)(Time.frameCount);
-                var mutateJobs = new JobHandle[trainees.Count];
-                var evolveJobs = new JobHandle[trainees.Count];
-
-                for (int i = 0; i < trainees.Count; ++i)
-                {
-                    if (trainees[i] == winner.trainee)
-                        continue;
-
-                    var jobMutate = trainees[i].QueueJobMutate(seed, mutateRate);
-                    var jobEvolve = trainees[i].QueueJobEvolve(seed, winner.trainee, evolveRate, jobMutate);
-
-                    mutateJobs[i] = jobMutate;
-                    evolveJobs[i] = jobEvolve;
-
-                    if ((i % 8) == 0)
-                        JobHandle.ScheduleBatchedJobs();
-                }
-
-                for (int i = 0; i < trainees.Count; ++i)
-                    evolveJobs[i].Complete();
+                bestTrainee = winner.trainee;
             }
             else
             {
-                bestScore += 1.0f;
-
-                Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): no winner, skipping (best score: {0})", bestScore);
-                Debug.LogFormat("");
-
-                var seed = (uint)(Time.frameCount);
-                var mutateJobs = new JobHandle[trainees.Count];
-
-                for (int i = 0; i < trainees.Count; ++i)
-                {
-                    if (trainees[i] == winner.trainee)
-                        continue;
-
-                    var jobMutate = trainees[i].QueueJobMutate(seed, mutateRate);
-
-                    mutateJobs[i] = jobMutate;
-
-                    if ((i % 8) == 0)
-                        JobHandle.ScheduleBatchedJobs();
-                }
-
-                for (int i = 0; i < trainees.Count; ++i)
-                    mutateJobs[i].Complete();
+                Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): cycle {0} === old winner: {1}: score: {2}", cycle, bestTrainee.name, bestScore);
             }
+
+            var seed = (uint)(Time.frameCount);
+
+            for (int i = 0; i < trainees.Count; ++i)
+            {
+                if (trainees[i] == bestTrainee)
+                    continue;
+
+                var jobMutate = trainees[i].QueueJobMutate(seed, mutateRate);
+                var jobEvolve = trainees[i].QueueJobEvolve(seed, bestTrainee, evolveRate);
+
+                var jobHandleMutate = jobMutate.Schedule();
+                var jobHandleEvolve = jobEvolve.Schedule(jobHandleMutate);
+
+                mutateJobs.Add(jobHandleMutate);
+                evolveJobs.Add(jobHandleEvolve);
+
+                if ((i % 8) == 0)
+                    JobHandle.ScheduleBatchedJobs();
+            }
+
+            // this shouldnt be needed but getting dependency error
+            for (int i = 0; i < mutateJobs.Count; ++i)
+                mutateJobs[i].Complete();
+            mutateJobs.Clear();
+
+            for (int i = 0; i < evolveJobs.Count; ++i)
+                evolveJobs[i].Complete();
+            evolveJobs.Clear();
 
             for (int i = 0; i < trainees.Count; ++i)
                 trainees[i].GetComponent<Rigidbody>().isKinematic = true;
             yield return null;
             for (int i = 0; i < trainees.Count; ++i)
                 trainees[i].GetComponent<Rigidbody>().isKinematic = false;
+
+            cycle++;
 
             yield return null;
         }
@@ -357,7 +357,7 @@ public class NeuralTrainerEvolution_Follow
         }
     }
 
-    public JobHandle QueueTrainingJob(NeuralBurst trainee, float dt)
+    public NeuralBurst.StepJob PrepareAndQueueJobStep(NeuralBurst trainee, float dt)
     {
         var traineeBody = trainee.GetComponent<Rigidbody>();
 
