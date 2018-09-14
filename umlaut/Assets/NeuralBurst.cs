@@ -112,6 +112,14 @@ public class NeuralBurstEditor
 public class NeuralBurst
     : MonoBehaviour
 {
+    [System.NonSerialized]
+    public Rigidbody cachedRigidbody;
+
+    private void OnEnable()
+    {
+        cachedRigidbody = GetComponent<Rigidbody>();
+    }
+
     private void OnDestroy()
     {
         if (bias0.IsCreated) bias0.Dispose();
@@ -458,5 +466,24 @@ public class NeuralBurst
             weights10[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? from.weights10[i] : weights10[i];
         for (int i = 0; i < Layer1 * Layer2; ++i)
             weights21[i] = UnityEngine.Random.Range(0.0f, 1.0f) < x ? from.weights21[i] : weights21[i];
+    }
+
+    public Color GenerateColor()
+    {
+        var result = new Color(0, 0, 0, 1);
+
+        for (int i = 0; i < Layer0; ++i)
+            result.r += bias0[i] + 0.5f;
+        result.r /= (float)Layer0;
+
+        for (int i = 0; i < Layer1; ++i)
+            result.g += bias1[i] + 0.5f;
+        result.g /= (float)Layer1;
+
+        for (int i = 0; i < Layer2; ++i)
+            result.b += bias2[i] + 0.5f;
+        result.b /= (float)Layer2;
+
+        return result;
     }
 }

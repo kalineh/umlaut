@@ -50,8 +50,8 @@ public class NeuralTrainerEvolution_Follow
     [System.NonSerialized] public int hyperSpeed = 5;
 
     [System.NonSerialized] public float copyRate = 0.0f;
-    [System.NonSerialized] public float mutateRate = 0.01f;
-    [System.NonSerialized] public float evolveRate = 0.90f;
+    [System.NonSerialized] public float mutateRate = 0.001f;
+    [System.NonSerialized] public float evolveRate = 0.10f;
 
     [System.NonSerialized] public int trainingPhase = 0;
 
@@ -82,7 +82,7 @@ public class NeuralTrainerEvolution_Follow
             var neural = obj.GetComponent<NeuralBurst>();
 
             neural.Automatic = false;
-            neural.Configure(6, 2048, 4);
+            neural.Configure(6, 64000, 4);
             neural.Randomize();
 
             trainees.Add(neural);
@@ -155,6 +155,8 @@ public class NeuralTrainerEvolution_Follow
 
                 trainee.transform.position = position + worldOffset;
                 trainee.transform.rotation = Quaternion.LookRotation(Random.onUnitSphere);
+
+                trainee.GetComponent<Renderer>().material.color = trainee.GenerateColor();
             }
 
             switch (trainingPhase)
@@ -288,8 +290,6 @@ public class NeuralTrainerEvolution_Follow
 
             results.Sort(CompareResults);
 
-            bestScore += 0.1f;
-
             var winner = results[0];
             if (winner.score < bestScore)
             {
@@ -297,16 +297,20 @@ public class NeuralTrainerEvolution_Follow
 
                 bestScore = winner.score;
                 bestTrainee = winner.trainee;
+
+                bestScore += 0.1f;
             }
             else
             {
                 Debug.LogFormat("NeuralTrainerEvolution_Follow.RunTrainingLoop(): cycle {0} === old winner: {1}: score: {2}", cycle, bestTrainee.name, bestScore);
-            }
 
-            var seed = (uint)(Time.frameCount);
+                bestScore += 1.0f;
+            }
 
             for (int i = 0; i < trainees.Count; ++i)
             {
+                var seed = (uint)(Time.frameCount * (i + 1));
+
                 if (trainees[i] == bestTrainee)
                     continue;
 
@@ -333,10 +337,10 @@ public class NeuralTrainerEvolution_Follow
             evolveJobs.Clear();
 
             for (int i = 0; i < trainees.Count; ++i)
-                trainees[i].GetComponent<Rigidbody>().isKinematic = true;
+                trainees[i].cachedRigidbody.isKinematic = true;
             yield return null;
             for (int i = 0; i < trainees.Count; ++i)
-                trainees[i].GetComponent<Rigidbody>().isKinematic = false;
+                trainees[i].cachedRigidbody.isKinematic = false;
 
             cycle++;
 
@@ -359,7 +363,7 @@ public class NeuralTrainerEvolution_Follow
 
     public NeuralBurst.StepJob PrepareAndQueueJobStep(NeuralBurst trainee, float dt)
     {
-        var traineeBody = trainee.GetComponent<Rigidbody>();
+        var traineeBody = trainee.cachedRigidbody;
 
         trainee.state0[0] = target.transform.position.x - trainee.transform.position.x;
         trainee.state0[1] = target.transform.position.y - trainee.transform.position.y;
@@ -374,26 +378,22 @@ public class NeuralTrainerEvolution_Follow
 
     public void AfterTrainingJob(NeuralBurst trainee, float dt)
     {
-        var traineeBody = trainee.GetComponent<Rigidbody>();
+        var traineeBody = trainee.cachedRigidbody;
 
-        var brake = trainee.state2[3];
-
-        traineeBody.AddForce(traineeBody.velocity * -brake * dt, ForceMode.Acceleration);
-
+        var brake = traineeBody.velocity * -trainee.state2[3];
         var force = new Vector3(
             trainee.state2[0],
             trainee.state2[1],
             trainee.state2[2]
-        );
+        ) * 1000.0f;
 
         //if (float.IsNaN(force.x)) force.x = 0.0f;
         //if (float.IsNaN(force.y)) force.y = 0.0f;
         //if (float.IsNaN(force.z)) force.z = 0.0f;
 
-        // arbitrary speedup
-        force *= 1000.0f;
+        var apply = (brake + force) * dt;
 
-        traineeBody.AddForce(force * dt, ForceMode.Acceleration);
+        traineeBody.AddForce(apply, ForceMode.Acceleration);
 
         if (showDebugLines)
         {
